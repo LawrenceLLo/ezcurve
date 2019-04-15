@@ -1,0 +1,165 @@
+#EZ curve try1
+
+EZcurve <- function(DATA,TP,mcmcN=1000,TRACK=F){
+
+#Call lme4 library
+require(lme4)
+#Set seed value for MCMC sampling
+set.seed(56)
+
+#Extract time vector
+tp <- tp. <- DATA[,2]
+#Extract response vector
+re <- DATA[,3]
+#Extract subject vector
+S <- DATA[,1]
+#Extract covariate vector
+if(ncol(DATA) > 3){
+Cinc <- T
+CE <- DATA[,4:ncol(DATA)]
+}else{
+Cinc <- F}
+
+#Identify max timepoint
+mt <- TP
+#Generate time polynomials
+for(p in 2:mt){
+ tpn <- tp.^p
+ tp <- cbind(tp,tpn)}
+#Generate AIC storage vector
+aic <- aic. <- rep(NA,mt)
+#Generate variance component storage vector
+#Stores highest order significance status
+#(1=Sig,0=Non-sig)
+vcs <- vcs. <- rep(NA,mt)
+#Generate fixed effect storage vector (inner loop)
+fes <- fes. <- rep(NA,mt)
+#Generate fixed effect storage vector (outer loop)
+FES <- FES. <- rep(NA,mt-1)
+#Outer loop random effect storage
+REO <- rep(NA,mt)
+#Formula components
+FEf <- paste("tp[,",1:(mt-1),"]",sep="")
+REf <- paste("(0+tp[,",1:(mt-1),"]|S)",sep="")
+FEi <- paste("tp[,",1:(mt-1),"]:CE",sep="")
+#Stop ticker
+TICK <- 0
+
+#Model fitting loops
+for(f in 1:(mt-1)){ #Begin outer loop FE
+ #Generate formula
+ FO <- as.formula(paste("re~",
+ paste(FEf[1:f],collapse="+"),
+ if(Cinc==T){paste("+CE+",FEi[1:f],collapse="+")},
+ "+(1|S)"))
+ #Fit random intercept model
+ fit <- lmer(FO)
+  #Reset fit storage vectors
+  aic <- aic.
+  vcs <- vcs.
+  fes <- fes.
+  #aic
+  aic[mt] <- AIC(logLik(fit))
+  #Var test by mcmc/HPDint method
+  
+  #cat("\n",f,0,"\n")
+  #print(summary(fit)@REmat)
+  #print(as.numeric(summary(fit)@REmat[1,3]))
+  
+  ms <- mcmcsamp(fit,n=mcmcN)
+  HPD <- HPDinterval(ms)
+  lcutr <- HPD$ST[1,1]
+  if(0 >= lcutr | as.numeric(summary(fit)@REmat[1,3])==0){
+  vcs[mt]<-0}else{vcs[mt]<-1}
+  #Fixed effect test
+  if(abs(summary(fit)@coefs[(f+1),3]) > 2){
+  fes[mt]<-1}else{fes[mt]<-0}
+  if(TRACK==T){
+  cat("\n",f,0,"\n")
+  cat("\n Fixed effects \n")
+  print(summary(fit)@coefs)
+  cat("\n Random effects \n")
+  print(HPD$ST)}
+
+ for(r in 1:f){ #Begin inner loop RE
+  #Generate formula
+  FO <- as.formula(paste("re~",
+  paste(FEf[1:f],collapse="+"),
+  if(Cinc==T){paste("+CE+",FEi[1:f],collapse="+")},
+  "+(1|S)+",paste(REf[1:r],collapse="+")))
+  #Random time effects fit
+  fit <- lmer(FO)
+  #fit <- update(fit,~.+(0+tp[,r]|S))
+  
+  #cat("\n",f,r,"\n")
+  #print(summary(fit)@REmat)
+  #print(as.numeric(summary(fit)@REmat[r+1,3]))
+  
+    aic[r] <- AIC(logLik(fit))
+      ms <- mcmcsamp(fit,n=mcmcN)
+      HPD <- HPDinterval(ms)
+      lcut <- HPD$ST[r+1,1]
+      if(0 >= lcut | as.numeric(summary(fit)@REmat[r+1,3])==0){
+      vcs[r]<-0}else{vcs[r]<-1}
+      if(abs(summary(fit)@coefs[(f+1),3]) > 2){
+      fes[r]<-1}else{fes[r]<-0}
+      if(TRACK==T){
+      cat("\n",f,r,"\n")
+      cat("\n Fixed effects \n")
+      print(summary(fit)@coefs)
+      cat("\n Random effects \n")
+      print(HPD$ST)}
+ }#End inner loop RE
+
+ #Model selection
+ #(Smallest AIC of models with sig RE)
+ if(any(vcs==1,na.rm=T)){
+ sm <- which(vcs==1)
+ SM <- which(aic==min(aic[sm],na.rm=T))
+ }else{
+ SM <- which(aic==min(aic,na.rm=T))}
+ REO[f] <- SM
+ #Highest order fixed effect sig status of selected model
+ FES[f]<-fes[SM]
+ ##Determine procedure stop
+ #(If last 2 polynomial order FE or nonsig)
+ if(f  > 2){
+ if(FES[f]==0 & FES[f-1]==0){
+ FF <- f-2
+ RF <- REO[f-2]
+ TICK <- 1
+ break}}
+} #End outer loop FE
+#If last fixed effect is non-sig
+if(TICK == 0){
+if(FES[mt-1]==0){
+ FF <- mt-2
+ RF <- REO[mt-2]
+ }else{
+ FF<-mt-1
+ RF <- REO[mt-1]}}
+
+##Final refit
+#Final formula generation
+if(RF==mt){
+ FO <- as.formula(paste("re~",
+  paste(FEf[1:FF],collapse="+"),
+  if(Cinc==T){paste("+CE+",FEi[1:FF],collapse="+")},
+  "+(1|S)"))
+  }else{
+ FO <- as.formula(paste("re~",
+  paste(FEf[1:FF],collapse="+"),"+(1|S)+",
+  if(Cinc==T){paste("CE+",FEi[1:FF],collapse="+")},"+",
+  paste(REf[1:RF],collapse="+")))}
+#Final fit
+fitF <- lmer(FO)
+msF <- mcmcsamp(fitF,n=mcmcN)
+HPDF <- HPDinterval(msF)
+
+OUT <- list(fitF=fitF,HPDF=HPDF)
+
+return(OUT)
+}
+
+
+
