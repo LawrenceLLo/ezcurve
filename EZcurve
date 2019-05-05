@@ -2,6 +2,8 @@
 
 #test edit 5/5/19
 
+#test edit pull request 2 5/5/19
+
 EZcurve <- function(DATA,TP,mcmcN=1000,TRACK=F){
 
 #Call lme4 library
